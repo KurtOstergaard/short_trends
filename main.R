@@ -10,6 +10,7 @@ library(plotly)
 library(profvis)
 library(microbenchmark)
 library(rlang)
+# library(clock)
 
 ################ C code for EMA calculation with no leading NA
 sourceCpp(
@@ -56,19 +57,22 @@ HAOHLC <- function(x) {
 # h1 <- read_csv("CME_MINI_NQ1!, 60_f371d.csv", col_names = TRUE)
 # h2 <- read_csv("CME_MINI_NQ1!, 120_925b9.csv", col_names = TRUE)
 # h3 <- read_csv("CME_MINI_NQ1!, 180_62ca4.csv", col_names = TRUE)
-h4 <- read_csv("CME_MINI_NQ1!, 240_48328.csv", col_names = TRUE)
+# h4 <- read_csv("CME_MINI_NQ1!, 240_48328.csv", col_names = TRUE)
 # h6 <- read_csv("CME_MINI_NQ1!, 360_2a174.csv", col_names = TRUE)
 # spec(h6)
+h4 <- read_csv("Aug23-1000.csv", col_names = TRUE)
 
 h4HA <- HAOHLC(h4) 
 h4HA <- h4HA |> rownames_to_column("time") |>
   mutate(real_open = h4$open,
          real_close = h4$close,
-         spread = lead(real_open) - real_close,
-         time = as.POSIXct(time, tz=Sys.timezone())) |>
+         skid = lead(real_open) - real_close,
+         time = as.POSIXlt(time, tz="America/New_York")) |>
   na.omit() |>
   as_tibble() 
   
+# h4NYC <- with_tz(h4, tz = "America/New_York")
+# time = as.POSIXct(time, tz=Sys.timezone())
 
 # max(h4HA$spread) # 171 Wow!
 # min(h4HA$spread) # -287.5 double Wow!
@@ -79,10 +83,11 @@ results <- tibble()
 colnames(results) <- unlist(str_split("j, slow_lag, fast_lag,
             ICAGR, drawdown, bliss, lake, end_val, trade_test", ", "))
 
-# for (j in seq(3, 5, 1)){   #initiate optimization sequence
-j <- 5
+# Scenario or Optimization?
+j <- 18     # Scenario run
+# for (j in seq(3, 5, 1)) {   #initiate optimization sequence
   df <- h4HA
-  df$lag <- ewmaRcpp(df$ha.close, j)
+  df$lag <- ewmaRcpp(df$real_close, j)
   
   df<- df |>                # create trade signal 
     mutate(cross = ha.close - lag,
@@ -149,8 +154,8 @@ j <- 5
       filter(off == -1) |>
       select(!off)
     trades <- bind_cols(buys, sells)
-    trades$buy_date <- as.Date(as.numeric(trades$buy_date))
-    trades$sell_date <- as.Date(as.numeric(trades$sell_date))
+    trades$buy_date <- as_datetime(as.numeric(trades$buy_date))
+    trades$sell_date <- as_datetime(as.numeric(trades$sell_date))
     trades$trade_pnl <- (trades$sell_price - trades$buy_price) * trades$buy_amount
   }
   z <- df$equity[nrow(df)]
@@ -158,12 +163,25 @@ z
 zz <- sum(trades$trade_pnl)
 zz
 # calc win/lose count and avg win/lose $        Start here!
-win_count <- trades |>
-  select(trades$trade_pnl > 0) |>
+ntrades <- nrow(trades)
+count_wins <- trades |>
+  filter(trades$trade_pnl > 0) |>
+  nrow()
+count_lose <- trades |>
+  filter(trades$trade_pnl <= 0) |>
   nrow()
 
+win_pnl <- trades |>
+  filter(trades$trade_pnl > 0) |>
+  sum()
 
-# } optimization end
+
+trades |>
+  select(trades$trade_pnl > 0) |>
+  win_count <- nrow |>
+  win_pnl = sum()
+
+# }   # optimization end
 
 
 
