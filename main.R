@@ -11,6 +11,7 @@ library(profvis)
 library(microbenchmark)
 library(rlang)
 library(clock)
+library(ggrepel)
 
 start_time <- Sys.time()
 
@@ -222,7 +223,10 @@ write_csv(results, file_name)
 zz <- split_fun(trades, trade_pnl)
 zz
 
+
 ################# the promised land of pretty graphs
+options(ggrepel.max.overlaps = Inf)
+
 df <- df |>
   mutate(date = as.POSIXct(time)) 
 df |>        # The Market
@@ -236,7 +240,7 @@ df |>        # The Market, detailed  - maybe a different color?
   geom_ribbon(aes(ymin=real_low, ymax=real_high, x=date, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
   scale_fill_manual("", values="red") +
-  geom_point(data=df, aes(x=date, y=real_close), shape=3, alpha=0.8) +
+  geom_point(aes(x=date, y=real_close), shape=3, alpha=0.8) +
   labs(title=paste("The market: red is highs and lows, + are closes"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag ),) 
 
@@ -244,8 +248,8 @@ df |>        # Trades    Fix the damn trade lines and line color
   ggplot() +
   geom_point( aes(x=date, y=real_close), shape=3, alpha=0.4) +
   geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
-                                yend=sell_price, size = 1, color="black")) +
-  labs(title="Trades and market closes",
+                    yend=sell_price, size = 2, color="black")) +
+  labs(title="Trades and candle closes",
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
 df |>        # lake over time with equity
@@ -280,31 +284,38 @@ df |>       # equity, highwater and market lines
   labs(title=paste("Equity with highwater and the market"),
     subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
-
+#   risk and return optimization scatterplots
 rzlt <- results
  
-rzlt |>
-  ggplot(aes(x = ICAGR, y = drawdown, label = lag, check_overlap = TRUE)) +
-  geom_label() +
+rzlt |>         # labels for EMA numbers, little white boxes
+  ggplot(aes(x = ICAGR, y = drawdown, label = lag)) +
+  geom_point(shape=4) +
+  geom_label_repel(label.padding=unit(0.15, "lines"), label.size=0.05, 
+                   min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Growth rate vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
 rzlt |>
-  ggplot(aes(x = lake, y = bliss, check_overlap = TRUE)) +
-  geom_label(aes(label = lag)) +
+  ggplot(aes(x = lake, y = bliss, label = lag)) +
+  geom_point(shape=4) +
+  geom_label_repel(label.padding=unit(0.15, "lines"), label.size=0.05, 
+            min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Lake ratio vs bliss"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
 rzlt |>
-  ggplot(aes(x = lake, y = drawdown, check_overlap = TRUE)) +
-  geom_label(aes(label = lag)) +
+  ggplot(aes(x = lake, y = drawdown, label = lag)) +
+  geom_point(shape=4) +
+  geom_label_repel(label.padding=unit(0.15, "lines"), label.size=0.05, 
+                   min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Lake ratio vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
-
 rzlt |>
-  ggplot(aes(x = end_value, y = drawdown, check_overlap = TRUE)) +
-  geom_label(aes(label = lag))  +
+  ggplot(aes(x = end_value, y = drawdown, label = lag)) +
+  geom_point(shape=4) +
+  geom_label_repel(label.padding=unit(0.15, "lines"), label.size=0.05, 
+                   min.segment.length=0, force=0.5, max.iter=10000) +
   scale_x_continuous(labels=scales::dollar_format()) +
   labs(title=paste("Ending value vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag)) 
@@ -312,206 +323,20 @@ rzlt |>
   # geom_smooth(method = "lm")
 
 rzlt |>
-  ggplot(aes(x = ICAGR, y = lake, check_overlap = TRUE)) +
-  geom_label(aes(label = lag))  +
+  ggplot(aes(x = ICAGR, y = lake, label = lag)) +
+  geom_point(shape=4) +
+  geom_label_repel(label.padding=unit(0.1, "lines"), label.size=0.05, 
+       min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Growth rate vs lake ratio"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag)) 
 
 rzlt |>
-  ggplot(aes(x = bliss, y = drawdown, check_overlap = TRUE)) +
-  geom_label(aes(label = lag)) +
+  ggplot(aes(x = bliss, y = drawdown, label = lag)) +
+  geom_point(shape=4) +
+  geom_label_repel(label.padding=unit(0.15, "lines"), label.size=0.05, 
+          min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Bliss vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag)) 
-
-
-
-
-
-################ New Graph idea
-
-# Sample market price data (replace with your actual market data)
-# set.seed(42)
-# start_date <- as.POSIXct("2023-01-01", tz = "UTC")
-# time_intervals <- seq(start_date, length.out = 10 * 365 * 6, by = "4 hours")
-# market_prices <- data.frame(
-#   time = time_intervals,
-#   price = cumsum(runif(length(time_intervals), min = -0.5, max = 0.5))
-# )
-
-# Sample trade data (replace with your actual trade data)
-# trades <- data.frame(
-#   buy_date = sample(time_intervals, size = 10),
-#   buy_price = runif(10, min(market_prices$price), max(market_prices$price)),
-#   sell_date = sample(time_intervals, size = 10),
-#   sell_price = runif(10, min(market_prices$price), max(market_prices$price))
-# )
-
-# Define a function to create the ggplot graph
-create_trade_plot <- function(df, trades) {
-  trades <- trades |>
-    mutate(
-      buy_date_day_before = buy_date - days(1),
-      sell_date_day_after = sell_date + days(1),
-      trade_index = row_number()  # Create an index variable for trade facets
-    )
-  
-  p <- ggplot() +
-    geom_line(data = df, aes(x = date, y = real_close)) +
-    geom_segment(data = trades, aes(x = buy_date, xend = sell_date, y = buy_price, yend = sell_price),
-                 color = "red", size = 1) +
-    facet_wrap(~ trade_index, scales = "free_x", ncol = 1) +
-    labs(x = "Time", y = "Price") +
-    theme_minimal()
-  
-  return(p)
-}
-
-# Create the ggplot graph
-plot <- create_trade_plot(df, trades)
-
-# Print the graph
-print(plot)
-
-######################## End of new graph idea
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-###### stop here
-pnl <- rzlt |>
-  select(slow_lag, fast_lag, end_val) |>
-  pivot_wider(names_from = slow_lag, values_from = end_val) |>
-  as.matrix()
-blip <-  sort(unique(pnl[,1]))
-rownames(pnl) <- blip
-pnl <- pnl[,-1]
-
-
-plot_ly(z = ~pnl) |> add_surface(
-  contours = list(
-    z = list(
-      show=TRUE,
-      usecolormap=TRUE,
-      highlightcolor="#ff0000",
-      project=list(z=TRUE)
-    )
-  )
-)
-
-happy <- rzlt |>
-  select(slow_lag, fast_lag, bliss) |>
-  pivot_wider(names_from = slow_lag, values_from = bliss) |>
-  as.matrix()
-happy <- happy[,-1]
-xax <- sort(unique(rzlt$slow_lag))
-yax <- sort(unique(rzlt$fast_lag))
-
-plot_ly(z = happy, x=xax, y=yax, type = "surface") |>
-  layout(scene = list(
-    xaxis=list(title="slow"),
-    yaxis=list(title="fast", autorange="reversed"),
-    zaxis=list(title="Bliss")
-  ))
-
-
-fig <- plot_ly(z = happy, x=xax, y=yax) |> add_surface(
-  contours = list(
-    z = list(
-      show=TRUE,
-      usecolormap=TRUE,
-      highlightcolor="#ff0000",
-      project=list(z=TRUE)
-    )
-  )
-)
-fig <- fig |>  layout(
-  scene = list(
-    xaxis=list(title="slow"),
-    yaxis=list(title="fast", autorange="reversed"),
-    zaxis=list(title="Bliss")
-  ))
-
-fig
-
-
-plot_ly(z = ~happy) |> add_surface(
-  contours = list(
-    z = list(
-      show=TRUE,
-      usecolormap=TRUE,
-      highlightcolor="#ff0000",
-      project=list(z=TRUE)
-    )
-  )
-)
-
-cc <-  cor(rzlt$ICAGR, rzlt$drawdown, method="pearson")
-cc
-plot_ly(z = volcano, type = "surface")
-
-# https://win-vector.com/2015/07/27/efficient-accumulation-in-r/
-# notes on efficient accumulation
-
-trades |>       # trades
-  ggplot(aes(x = date)) +
-  geom_segment(aes(x=buy_date, y=buy_price, xend=sell_date, yend=sell_price,
-                   color="black"))
-
-trades |>       # trades
-  ggplot(aes(x = date)) +
-  geom_segment(aes(x=buy_date, y=buy_price, xend=sell_date, yend=sell_price,
-                   color="black"))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-sketch <- tibble() |>
-  colnames(unlist(list("m30", "h1", "h2", "h3", "h4", "h6")))
-
-evry <- bind_rows(h6, h4, h3, h2, h1, m30, .id="id") 
-
-evry1 <- evry |>
-  select(time:close) |>
-  distinct(.keep_all = FALSE) |>
-  arrange(time)
-
-
-test <- h6 |>
-  filter(time >"2023-08-15" & time < "2023-08-17")
 
 
 
