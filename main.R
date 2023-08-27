@@ -54,34 +54,7 @@ HAOHLC <- function(x) {
   return(reclass(r, x))
 }
 
-sum_fun <- function(data, column_name, factor_name) {
-  summary_stats <- data |>
-    group_by({{ factor_name }}) |>
-    summarise(
-      mean = mean({{ column_name }}),
-      median = median({{ column_name }}),
-      sd = sd({{ column_name }}),
-      min = min({{ column_name }}),
-      max = max({{ column_name }})
-    )
-  return(summary_stats)
-}
-#  Good original version
-# split_fun <- function(data, column_name, factor_name) {
-#   summary_stats <- data |>
-#     mutate(category = ifelse({{ column_name }} >= 0, "Positive", "Negative")) |>
-#     group_by({{ factor_name }}, category) |>
-#     summarise(
-#       mean = mean({{ column_name }}),
-#       median = median({{ column_name }}),
-#       sd = sd({{ column_name }}),
-#       min = min({{ column_name }}),
-#       max = max({{ column_name }})
-#     )
-#   return(summary_stats)
-# }
-  
-# ChatGPT new, improved super version
+# calculates pnl summary statistics
 split_fun <- function(data, column_name, factor_name) {
   summary_stats <- data |>
     mutate(category = ifelse({{ column_name }} >= 0, "Positive", "Negative")) |>
@@ -96,7 +69,6 @@ split_fun <- function(data, column_name, factor_name) {
       max = max({{ column_name }})
     ) |>
     select({{ factor_name }}, category, sum, count, everything())
-  
   return(summary_stats)
 }
 
@@ -107,31 +79,33 @@ split_fun <- function(data, column_name, factor_name) {
 # # h3 <- read_csv("CME_MINI_NQ1!, 180_62ca4.csv", col_names = TRUE)
 # # h6 <- read_csv("CME_MINI_NQ1!, 360_2a174.csv", col_names = TRUE)
 # # spec(h6)
-# h4s <- read_csv("Aug23-1000.csv", col_names = TRUE)
-# a24u <- read_csv("Aug24unix.csv", col_names = TRUE)
-# NQ1H <- read_csv("NQ1H.csv", col_names = TRUE)
 # NQ1D <- read_csv("NQ1D.csv", col_names = TRUE)
 # NQ240 <- read_csv("NQ240.csv", col_names = TRUE)
-# h4 <- read_csv("Aug24.csv", col_names = TRUE)
+h4 <- read_csv("Aug26b.csv", col_names = TRUE)
 
-h4 <- read_csv("CME_MINI_NQ1!, 240_48328.csv", col_names = TRUE)
+# h4 <- read_csv("CME_MINI_NQ1!, 240_48328.csv", col_names = TRUE)
 HA_input <- select(h4, time:close)
 h4HA <- HAOHLC(HA_input) 
 h4HA <- h4HA |> rownames_to_column("time") |>
   mutate(real_open = h4$open,
+         real_high = h4$high,
+         real_low = h4$low,
          real_close = h4$close,
-         skid = lead(real_open) - real_close,
          time = as.POSIXlt(time, tz="America/New_York")) |>
   na.omit() |>
   as_tibble() 
   
+         # skid = lead(real_open) - real_close,
 skid <- 0.5
 results <- tibble() 
 colnames(results) <- unlist(str_split("j, slow_lag, fast_lag,
             ICAGR, drawdown, bliss, lake, end_val, trade_test", ", "))
 
-# initiate optimization sequence
-runs <- expand.grid(lag = seq(2,5,1))
+
+######################## initiate optimization sequence
+EMA_low <- 2
+EMA_high <- 25
+runs <- expand.grid(lag = seq(EMA_low, EMA_high, 1))
 for (j in seq_len(nrow(runs))) {   
   df <- h4HA
   lag <- runs$lag[j]
@@ -178,6 +152,7 @@ for (j in seq_len(nrow(runs))) {
         (df$sell_price[i] - buy_price) * buy_amount
       buy_amount = 0
       df$open_pnl[i] = 0
+  
     } else if(df$signal[i] == 1) {
       buy_amount = 1
       df$buy_amount[i] = buy_amount
@@ -188,7 +163,7 @@ for (j in seq_len(nrow(runs))) {
     df$equity[i] <- df$open_pnl[i] + df$closed_pnl[i]
     df$highwater[i] <- pmax(df$equity[i], df$highwater[i-1])
     df$water[i] <- df$highwater[i] - df$equity[i]
-    df$drawdown[i] <- df$water[i] / df$equity[i]
+    df$drawdown[i] <- df$water[i] / df$highwater[i]
   }
   # summary trade table 
   trade_test <- sum(df$signal)
@@ -205,11 +180,19 @@ for (j in seq_len(nrow(runs))) {
     trades$buy_date <- as_datetime(as.numeric(trades$buy_date))
     trades$sell_date <- as_datetime(as.numeric(trades$sell_date))
     trades$trade_pnl <- (trades$sell_price - trades$buy_price) * trades$buy_amount
+    # trades <- trades %>%
+    #   mutate(min_low = map_dbl(1:n(), ~ {
+    #     row <- .x
+    #     df %>%
+    #       filter(time > trades$buy_date[row], time <= trades$sell_date[row]) %>%
+    #       pull(real_low) %>%
+    #       min(na.rm = TRUE)
+    #   }))
   }
 end_value <- df$equity[nrow(df)] * 20
 end_val <- end_value / 1000000
 ratio <- end_value/ start_value
-start_date <- min(df$time) ; end_date <- max(df$time)
+start_date <- min(df$time, na.rm=TRUE) ; end_date <- max(df$time, na.rm=TRUE)
 date_range <- as.numeric(difftime(end_date, start_date, units = "days")) / 365.25
 ICAGR <- if(ratio <= 0) 0 else log(ratio)/ date_range
 drawdown <- max(df$drawdown)
@@ -220,80 +203,129 @@ results[j,1:9] <- as_tibble_row(
     end_value=end_value, end_val=end_val, trade_test=trade_test),
   .name_repair = "universal")
 
-}       # optimization loop end
+}       #################### optimization loop end
 end_time <- Sys.time() ;forever <- end_time - start_time
 secs <- forever  / nrow(runs)
 sprintf("Yo, %1.2f total time and %1.4f per run, %i runs", forever, secs, nrow(runs))
 
-
-
+# save the results
+path <- getwd()
+first_row_time <- df$time[1] ; second_row_time <- df$time[2]
+interval_mins <- as.numeric(difftime(second_row_time, first_row_time, units = "mins"))
+run_id <- paste0(get_month(start_date),"-", get_year(start_date),"--",
+                 get_month(end_date), "-", get_year(end_date), " ",
+                 interval_mins/60, "hr EMAs ", EMA_low, "-", EMA_high)
+run_time <- paste0(" ", get_hour(end_time), ":", get_minute(end_time))
+file_name <- paste0(path, "/results ", run_id, run_time, ".csv", sep="")
+write_csv(results, file_name)
 
 zz <- split_fun(trades, trade_pnl)
 zz
 
-# the promised land of pretty graphs
+################# the promised land of pretty graphs
 df <- df |>
   mutate(date = as.POSIXct(time)) 
-df |>
+df |>        # The Market
   ggplot(aes(x = date, y = real_close)) +
-  geom_line(size = 1, alpha = 0.5)
+  geom_line(size = 1, alpha = 0.5) + 
+  labs(title=paste("The market"),
+  subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr"))
 
-ggplot() +
-  geom_point(data=df, aes(x=date, y=close), alpha=0.2) +
-  geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
-                                yend=sell_price, size = 1, color="black"))
-
-df |>        # lake
+df |>        # The Market, detailed  - maybe a different color?
   ggplot(aes(x = date)) +
-  geom_ribbon(aes(ymin=equity, ymax=highwater, x=date, fill = "band"), alpha = 0.9)+
+  geom_ribbon(aes(ymin=real_low, ymax=real_high, x=date, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
-  scale_fill_manual("", values="red")
+  scale_fill_manual("", values="red") +
+  geom_point(data=df, aes(x=date, y=real_close), shape=3, alpha=0.8) +
+  labs(title=paste("The market: red is highs and lows, + are closes"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag ),) 
 
-df |>       # equity and highwater
-  mutate(close_big = close*10500) |>
+df |>        # Trades    Fix the damn trade lines and line color
+  ggplot() +
+  geom_point( aes(x=date, y=real_close), shape=3, alpha=0.4) +
+  geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
+                                yend=sell_price, size = 1, color="black")) +
+  labs(title="Trades and market closes",
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
+
+df |>        # lake over time with equity
+  ggplot(aes(x = date)) +
+  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=date, fill = "band"), alpha = 0.9)+
+  scale_color_manual("", values="grey12")+
+  scale_fill_manual("", values="red") +
+  geom_line(aes(y = equity*20), size = 1, alpha = 0.8) +
+  labs(title=paste("Lake Ratio with equity line"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag ),
+       x="Year", y="Ending equity after $23k opening margin start") +
+  scale_y_continuous(labels=scales::dollar_format())
+
+
+df |>        # lake over time with highwter line
+  ggplot(aes(x = date)) +
+  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=date, fill = "band"), alpha = 0.9)+
+  scale_color_manual("", values="grey12")+
+  scale_fill_manual("", values="red") +
+  geom_line(aes(y = highwater*20), size = 1, alpha = 0.8) +
+  labs(title=paste("Lake Ratio with highwater line"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag ),
+       x="Year", y="Ending equity after $23k opening margin start") +
+  scale_y_continuous(labels=scales::dollar_format())
+
+df |>       # equity, highwater and market lines
+  mutate(market = (real_close-min(real_close))* (max(highwater) / (max(real_close)-min(real_close)))) |>
   ggplot(aes(x = date)) +
   geom_line(aes(y = equity),size = 1,  alpha = 0.9) +
-  geom_point(aes(y=highwater), size=1, shape = 4, alpha=0.1, color="black") +
-  geom_line(aes(y=close_big), size=1, alpha=0.2)
+  geom_line(aes(y=highwater), size=1,  alpha=0.4, color="black") +
+  geom_line(aes(y=market), size=2, alpha=0.1) +
+  labs(title=paste("Equity with highwater and the market"),
+    subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
-# check for second scale
-# https://stackoverflow.com/questions/59956953/plotting-secondary-axis-using-ggplot
-
-df |>
-  ggplot(aes(x = date)) +
-  geom_line(aes(y = equity), size = 1, alpha = 0.8) +
-  geom_line(aes(y = highwater), size=1, alpha=0.2)
 
 rzlt <- results
  
+rzlt |>
+  ggplot(aes(x = ICAGR, y = drawdown, label = lag, check_overlap = TRUE)) +
+  geom_label() +
+  labs(title=paste("Growth rate vs drawdowns"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
 rzlt |>
-  ggplot(aes(x = ICAGR, y = drawdown)) +
-  geom_point(size = 3, shape = 4)
+  ggplot(aes(x = lake, y = bliss, check_overlap = TRUE)) +
+  geom_label(aes(label = lag)) +
+  labs(title=paste("Lake ratio vs bliss"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
 rzlt |>
-  ggplot(aes(x = lake, y = bliss)) +
-  geom_point(size = 3, shape = 4)
+  ggplot(aes(x = lake, y = drawdown, check_overlap = TRUE)) +
+  geom_label(aes(label = lag)) +
+  labs(title=paste("Lake ratio vs drawdowns"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
+
 
 rzlt |>
-  ggplot(aes(x = lake, y = drawdown)) +
-  geom_point(size = 3, shape = 4)
+  ggplot(aes(x = end_value, y = drawdown, check_overlap = TRUE)) +
+  geom_label(aes(label = lag))  +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  labs(title=paste("Ending value vs drawdowns"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag)) 
 
-#  geom_smooth(method = "lm")
+  # geom_smooth(method = "lm")
 
 rzlt |>
-  ggplot(aes(x = ICAGR, y = lake)) +
-  geom_point(size = 3, shape = 4)
+  ggplot(aes(x = ICAGR, y = lake, check_overlap = TRUE)) +
+  geom_label(aes(label = lag))  +
+  labs(title=paste("Growth rate vs lake ratio"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag)) 
 
 rzlt |>
-  ggplot(aes(x = ICAGR, y = bliss)) +
-  geom_point(size = 3, shape = 4)
+  ggplot(aes(x = bliss, y = drawdown, check_overlap = TRUE)) +
+  geom_label(aes(label = lag)) +
+  labs(title=paste("Bliss vs drawdowns"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag)) 
 
 
-path <- getwd()
-now <- Sys.time()
-filename <- paste(path, "/results ", now, ".csv", sep="")
-write_csv(results, filename)
+
+
 
 ################ New Graph idea
 
