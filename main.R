@@ -226,14 +226,17 @@ zz
 
 ################# the promised land of pretty graphs
 options(ggrepel.max.overlaps = Inf)
+theme_set(theme_bw())  # or theme_light()
 
 df <- df |>
   mutate(date = as.POSIXct(time)) 
-df |>        # The Market
+df |>        # The Market and the EMA
   ggplot(aes(x = date, y = real_close)) +
-  geom_line(size = 1, alpha = 0.5) + 
-  labs(title=paste("The market"),
-  subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr"))
+  geom_line(size = 1, alpha = 1) + 
+  geom_line(aes(x=date, y=lag), alpha=0.5) +
+  labs(title=paste("The NQ futures closes and the", lag, "period EMA"),
+  subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr")) +
+  theme_light()
 
 df |>        # The Market, detailed  - maybe a different color?
   ggplot(aes(x = date)) +
@@ -247,10 +250,28 @@ df |>        # The Market, detailed  - maybe a different color?
 df |>        # Trades    Fix the damn trade lines and line color
   ggplot() +
   geom_point( aes(x=date, y=real_close), shape=3, alpha=0.4) +
+  geom_line(aes(x=date, y=lag), alpha=0.8) +
   geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
                     yend=sell_price, size = 2, color="black")) +
-  labs(title="Trades and candle closes",
+  labs(title="Trades, EMA and candle closes",
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
+
+tradez <- trades |>        # Trades facet wrap attempt   Fix the damn trade lines and line color
+  mutate(
+    buy_date_day_before = buy_date - days(1),
+    sell_date_day_after = sell_date + days(1),
+    trade_index = row_number()  # Create an index variable for trade facets
+  ) |>
+  ggplot() +
+  geom_line(data=df, aes(x=date, y=lag), alpha=0.6) +
+  geom_line(data=df, aes(x=date, y=real_close), alpha=0.9) +
+  geom_segment(data=tradez, aes(x=buy_date_day_before, y=buy_price, 
+        xend=sell_date_day_after, yend=sell_price, size = 1, color="black")) +
+  facet_wrap(~ trade_index, scales = "free_x") +
+  labs(title="Trades, EMA and candle closes",
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
+
+
 
 df |>        # lake over time with equity
   ggplot(aes(x = date)) +
