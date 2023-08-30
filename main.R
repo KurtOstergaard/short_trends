@@ -12,6 +12,10 @@ library(microbenchmark)
 library(rlang)
 library(clock)
 library(ggrepel)
+library(zoo)
+
+options(ggrepel.max.overlaps = Inf)      # ggrepel options for ggplot2
+theme_set(theme_light())                # ggplot theme or _bw()
 
 start_time <- Sys.time()
 
@@ -92,95 +96,78 @@ h4HA <- h4HA |> rownames_to_column("time") |>
          real_high = h4$high,
          real_low = h4$low,
          real_close = h4$close,
-         time = as.POSIXlt(time, tz="America/New_York")) |>
+         time = as.POSIXct(time, tz="America/New_York"),
+         yearmo = as.yearmon(time)) |>
   na.omit() |>
   as_tibble() 
   
-         # skid = lead(real_open) - real_close,
-skid <- 0.5
+first_row_time <- h4HA$time[1] ; second_row_time <- h4HA$time[2]
+interval_mins <- as.numeric(difftime(second_row_time, first_row_time, units = "mins"))
 results <- tibble() 
 colnames(results) <- unlist(str_split("j, slow_lag, fast_lag,
             ICAGR, drawdown, bliss, lake, end_val, trade_test", ", "))
 
-
-######################## initiate optimization sequence
+start_value <- 1162  # required overnight margin in points
+skid <- 0.5   # skid is expected loss on trade execution
 EMA_low <- 2
-EMA_high <- 25
+EMA_high <- 4
 runs <- expand.grid(lag = seq(EMA_low, EMA_high, 1))
-for (j in seq_len(nrow(runs))) {   
+######################## initiate optimization sequence ########################
+for (j in seq_len(nrow(runs))) {
   df <- h4HA
   lag <- runs$lag[j]
   df$lag <- ewmaRcpp(df$real_close, runs$lag[j])
   
   df<- df |>                # create trade signal 
     mutate(cross = ha.close - lag,
-           on = ifelse(cross > 0 & lag(cross) < 0, 1, 0),
-           off = ifelse(cross < 0 & lag(cross) > 0, -1, 0))
-  df <- slice(df, 30:n()) # drop first 30 rows to warm up EMA & Heikin Ashi
+           on = if_else(cross > 0 & lag(cross) < 0, 1, 0),
+           off = if_else(cross < 0 & lag(cross) > 0, -1, 0))
   
-  if(df$cross[1] > 0) df$on[1] <- 1  # first row
+  df <- slice(df, 30:n()) # drop first 30 rows to warm up EMA & Heikin Ashi
+  if(df$cross[1] > 0) df$on[1] <- 1  # first row only, set signal 
+  
   df <- df|>                         # trade signal details 
     mutate(signal = on + off,
-          buy_date = if_else(on == 1, as_datetime(lead(time)), as.POSIXct(0)),
-          buy_price = ifelse(on == 1, real_close + skid, 0),
-          buy_amount = 0,
-          sell_date = if_else(off == -1, as_datetime(lead(time)), as.POSIXct(0)),
-          sell_price = ifelse(off == -1, real_close - skid, 0))
-
-  if (df$cross[nrow(df)] > 0) {    # close out trade if long at EOF
+          buy_date = if_else(on == 1, as_datetime(lead(time), tz="America/New_York"), NA),
+          sell_date = if_else(off == -1, as_datetime(lead(time), tz="America/New_York"), NA),
+          buy_price = if_else(on == 1, real_close + skid, NA),
+          sell_price = if_else(off == -1, real_close - skid, 0),
+          buy_amount = 1,
+          open_trade = cumsum(signal)) |>
+    fill(buy_price) |>
+    fill(buy_date) |>
+    drop_na(buy_price)
+  
+  if (df$cross[nrow(df)] > 0 | df$signal[nrow(df)] == -1) { # close out trade if long at EOF
   df$off[nrow(df)] <- -1
   df$signal[nrow(df)] <- -1
+  df$open_trade[nrow(df)] <- 0
   df$sell_date[nrow(df)] <- df$time[nrow(df)]
-  df$sell_price[nrow(df)] <- df$real_close[nrow(df)] - skid
+  df$sell_price[nrow(df)] <- df$real_close[nrow(df)] - skid       
 }
- # return and risk variables
-  start_value <- 1162 ; df$closed_pnl <- 1162 ; df$highwater <- 1162
-  df$open_pnl <- 0 ; df$equity <- 0 ; df$water <- 0
-  df$drawdown <- 0 ; buy_amount <- 0 ; buy_price <- 0
-  # heat <- 0.1 # risk budget; not currently used, ATR_multiplier not used either
-  
-  # i=1 pnl trade calculation
-  if(df$signal[1] == 1) {
-    buy_amount = 1
-    df$buy_amount[1] = buy_amount
-    buy_price = df$buy_price[1]
-  }
-  # i>1 pnl trade calculation
-  for (i in seq2(2, nrow(df))) {
-    df$closed_pnl[i] = df$closed_pnl[i-1]
-    if(df$signal[i] == -1) {
-      df$closed_pnl[i] = df$closed_pnl[i] + 
-        (df$sell_price[i] - buy_price) * buy_amount
-      buy_amount = 0
-      df$open_pnl[i] = 0
-  
-    } else if(df$signal[i] == 1) {
-      buy_amount = 1
-      df$buy_amount[i] = buy_amount
-      buy_price = df$buy_price[i]
-    } else {
-      df$open_pnl[i] = (df$real_close[i] - buy_price) * buy_amount
-    }
-    df$equity[i] <- df$open_pnl[i] + df$closed_pnl[i]
-    df$highwater[i] <- pmax(df$equity[i], df$highwater[i-1])
-    df$water[i] <- df$highwater[i] - df$equity[i]
-    df$drawdown[i] <- df$water[i] / df$highwater[i]
-  }
+  df <- df |>
+    mutate(
+      trade_pnl = if_else(signal == -1, (sell_price - buy_price) * buy_amount, 0),
+      closed_pnl = cumsum(trade_pnl) + start_value,
+      open_pnl = (real_close - buy_price) * buy_amount * open_trade,
+      equity = open_pnl + closed_pnl,
+      highwater = cummax(equity),
+      lake = highwater - equity,
+      drawdown = lake / highwater
+    )
+
   # summary trade table 
-  trade_test <- sum(df$signal)
-  if(trade_test == 0) {
-    buys <- df |>
-      select(on, buy_date, buy_price, buy_amount) |>
-      filter(on == 1) |>
-      select(!on)
-    sells <- df |>
-      select(off, sell_date:drawdown) |>
+  trade_test <- sum(df$signal) 
+  if(trade_test != 0) warning("HOLY SHIT! THE TRADES ARE FUCKED!")
+    trades <- df |>
+      select(off, buy_date:drawdown) |>
       filter(off == -1) |>
-      select(!off)
-    trades <- bind_cols(buys, sells)
-    trades$buy_date <- as_datetime(as.numeric(trades$buy_date))
-    trades$sell_date <- as_datetime(as.numeric(trades$sell_date))
-    trades$trade_pnl <- (trades$sell_price - trades$buy_price) * trades$buy_amount
+      mutate(
+        off=NULL, open_trade=NULL, buy_amount=NULL,
+        color = ifelse(trade_pnl>0, "green", "red")) 
+
+    ##################### make the MAE column   ######################################
+        
     # trades <- trades %>%
     #   mutate(min_low = map_dbl(1:n(), ~ {
     #     row <- .x
@@ -189,70 +176,93 @@ for (j in seq_len(nrow(runs))) {
     #       pull(real_low) %>%
     #       min(na.rm = TRUE)
     #   }))
-  }
-end_value <- df$equity[nrow(df)] * 20
+    
+end_value <- df$equity[nrow(df)] 
 end_val <- end_value / 1000000
 ratio <- end_value/ start_value
-start_date <- min(df$time, na.rm=TRUE) ; end_date <- max(df$time, na.rm=TRUE)
+start_date <- min(df$time, na.rm=TRUE) 
+end_date <- max(df$time, na.rm=TRUE)
 date_range <- as.numeric(difftime(end_date, start_date, units = "days")) / 365.25
 ICAGR <- if(ratio <= 0) 0 else log(ratio)/ date_range
 drawdown <- max(df$drawdown)
-lake <- sum(df$water) / sum(df$equity)
+lake <- sum(df$lake) / sum(df$equity)
 bliss <- ICAGR / drawdown
-results[j,1:9] <- as_tibble_row(
+results[j,1:9] <- as_tibble_row(          
   c(j=j, lag=lag, ICAGR=ICAGR, drawdown=drawdown, bliss=bliss, lake=lake, 
     end_value=end_value, end_val=end_val, trade_test=trade_test),
   .name_repair = "universal")
 
-}       #################### optimization loop end
-end_time <- Sys.time() ;forever <- end_time - start_time
-secs <- forever  / nrow(runs)
-sprintf("Yo, %1.2f total time and %1.4f per run, %i runs", forever, secs, nrow(runs))
-
 # save the results
 path <- getwd()
-first_row_time <- df$time[1] ; second_row_time <- df$time[2]
-interval_mins <- as.numeric(difftime(second_row_time, first_row_time, units = "mins"))
 run_id <- paste0(get_month(start_date),"-", get_year(start_date),"--",
                  get_month(end_date), "-", get_year(end_date), " ",
                  interval_mins/60, "hr EMAs ", EMA_low, "-", EMA_high)
-run_time <- paste0(" ", get_hour(end_time), ":", get_minute(end_time))
+run_time <- paste0(" ", get_hour(start_time), ":", get_minute(start_time))
 file_name <- paste0(path, "/results ", run_id, run_time, ".csv", sep="")
 write_csv(results, file_name)
+
+df |>        # Trades, EMA and market graph  
+  ggplot(aes(x = date)) +
+  geom_ribbon(aes(ymin=real_low, ymax=real_high, x=time, fill = "band"), alpha = 0.9)+
+  scale_color_manual("", values="grey12")+
+  scale_fill_manual("", values="lightblue") +
+  geom_point(aes(x=time, y=real_close), shape=3, alpha=0.8) +
+  geom_line(aes(x=time, y=lag), alpha=0.9) +
+  geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
+                                yend=sell_price), linewidth = 2, color=trades$color) +
+  labs(title=sprintf("NQ: %.0f trades, EMA: %0.f, ICAGR:, %.2f, bliss: %.2f, lake: %.2f", 
+                     nrow(trades), lag, ICAGR, bliss, lake),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr" )) +
+  xlab("Date")+
+  ylab("NQ") 
+
+ggsave(paste("output/fig 1b EMA", lag, interval_mins/60, "hr", as.Date(start_date), "to", as.Date(end_date), ".pdf"))
+
+
+
+}       #################### optimization loop end    ##########################
+
+end_time <- Sys.time() ;forever <- end_time - start_time
+secs <- forever  / nrow(runs)
+sprintf("Yo, %1.2f total time and %1.2f per run, %i runs", forever, secs, nrow(runs))
+
 
 zz <- split_fun(trades, trade_pnl)
 zz
 
 
 ################# the promised land of pretty graphs
-options(ggrepel.max.overlaps = Inf)
-theme_set(theme_bw())  # or theme_light()
 
-df <- df |>
-  mutate(date = as.POSIXct(time)) 
-df |>        # The Market and the EMA
-  ggplot(aes(x = date, y = real_close)) +
-  geom_line(size = 1, alpha = 1) + 
-  geom_line(aes(x=date, y=lag), alpha=0.5) +
-  labs(title=paste("The NQ futures closes and the", lag, "period EMA"),
-  subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr")) +
-  theme_light()
+# df |>        # The Market, EMA and trades
+#   ggplot(aes(x = date, y = real_close)) +
+#   geom_line(size = 1, alpha = 1) + 
+#   geom_line(aes(x=time, y=lag), alpha=0.5) +
+#   labs(title=paste("NQ futures closes,", lag, "period EMA, for", nrow(trades),"trades"),
+#   subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr")) +
+#   theme_light()
+# ggsave("output/fig1.pdf")
 
-df |>        # The Market, detailed  - maybe a different color?
+df |>        # Trades and market graph  
   ggplot(aes(x = date)) +
-  geom_ribbon(aes(ymin=real_low, ymax=real_high, x=date, fill = "band"), alpha = 0.9)+
+  geom_ribbon(aes(ymin=real_low, ymax=real_high, x=time, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
-  scale_fill_manual("", values="red") +
-  geom_point(aes(x=date, y=real_close), shape=3, alpha=0.8) +
-  labs(title=paste("The market: red is highs and lows, + are closes"),
-       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag ),) 
-
-df |>        # Trades    Fix the damn trade lines and line color
-  ggplot() +
-  geom_point( aes(x=date, y=real_close), shape=3, alpha=0.4) +
-  geom_line(aes(x=date, y=lag), alpha=0.8) +
+  scale_fill_manual("", values="lightblue") +
+  geom_point(aes(x=time, y=real_close), shape=3, alpha=0.8) +
+  geom_line(aes(x=time, y=lag), alpha=0.5) +
   geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
-                    yend=sell_price, size = 2, color="black")) +
+                                yend=sell_price), linewidth = 2, color=trades$color) +
+  labs(title=paste("NQ: blue range of highs and lows, + are closes,", nrow(trades), "trades"),
+       subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag )) +
+  xlab("Date")+
+  ylab("NQ")
+ggsave(paste("output/fig 1b EMA", lag, interval_mins/60, "hr", as.Date(start_date), "to", as.Date(end_date), ".pdf"))
+
+df |>        # Trades    
+  ggplot() +
+  geom_line( aes(x=time, y=real_close), size=1, alpha=1) +
+  geom_line(aes(x=time, y=lag), alpha=0.4) +
+  geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
+                    yend=sell_price), linewidth = 2, color=trades$color) +
   labs(title="Trades, EMA and candle closes",
        subtitle=paste(start_date, "to", end_date, interval_mins/60, "hr", "EMA:", lag))
 
@@ -263,8 +273,8 @@ tradez <- trades |>        # Trades facet wrap attempt   Fix the damn trade line
     trade_index = row_number()  # Create an index variable for trade facets
   ) |>
   ggplot() +
-  geom_line(data=df, aes(x=date, y=lag), alpha=0.6) +
-  geom_line(data=df, aes(x=date, y=real_close), alpha=0.9) +
+  geom_line(data=df, aes(x=time, y=lag), alpha=0.6) +
+  geom_line(data=df, aes(x=time, y=real_close), alpha=0.9) +
   geom_segment(data=tradez, aes(x=buy_date_day_before, y=buy_price, 
         xend=sell_date_day_after, yend=sell_price, size = 1, color="black")) +
   facet_wrap(~ trade_index, scales = "free_x") +
@@ -275,7 +285,7 @@ tradez <- trades |>        # Trades facet wrap attempt   Fix the damn trade line
 
 df |>        # lake over time with equity
   ggplot(aes(x = date)) +
-  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=date, fill = "band"), alpha = 0.9)+
+  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=time, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
   scale_fill_manual("", values="red") +
   geom_line(aes(y = equity*20), size = 1, alpha = 0.8) +
@@ -287,7 +297,7 @@ df |>        # lake over time with equity
 
 df |>        # lake over time with highwter line
   ggplot(aes(x = date)) +
-  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=date, fill = "band"), alpha = 0.9)+
+  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=time, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
   scale_fill_manual("", values="red") +
   geom_line(aes(y = highwater*20), size = 1, alpha = 0.8) +
