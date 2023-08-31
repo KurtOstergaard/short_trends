@@ -82,12 +82,12 @@ split_fun <- function(data, column_name, factor_name) {
 # # h1 <- read_csv("CME_MINI_NQ1!, 60_f371d.csv", col_names = TRUE)
 # # h2 <- read_csv("CME_MINI_NQ1!, 120_925b9.csv", col_names = TRUE)
 # # h3 <- read_csv("CME_MINI_NQ1!, 180_62ca4.csv", col_names = TRUE)
-# h4 <- read_csv("CME_MINI_NQ1!, 240_48328.csv", col_names = TRUE)
+h4 <- read_csv("CME_MINI_NQ1!, 240_48328.csv", col_names = TRUE, show_col_types = FALSE)
 # # h6 <- read_csv("CME_MINI_NQ1!, 360_2a174.csv", col_names = TRUE)
 # # spec(h6)
 # NQ1D <- read_csv("NQ1D.csv", col_names = TRUE)
 # NQ240 <- read_csv("NQ240.csv", col_names = TRUE)
-h4 <- read_csv("Aug26b.csv", col_names = TRUE)
+# h4 <- read_csv("Aug26b.csv", col_names = TRUE, show_col_types = FALSE)
 
 HA_input <- select(h4, time:close)     # create the Haikin Ashi candlesticks
 h4HA <- HAOHLC(HA_input) 
@@ -254,67 +254,7 @@ trades |>
 
 ggsave(paste0("output/stop ", interval, "hr EMA ", lag, " ", epoch, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
-}       #################### optimization loop end    ##########################
-
-# save the results file
-run_id <- paste0( " ", interval, "hr EMAs ", EMA_low, "-", EMA_high, " from", epoch)
-file_name <- paste0(path, "/results/results ", run_id, run_time, ".csv", sep="")
-write_csv(results, file_name)
-
-
-end_time <- Sys.time() ;forever <- end_time - start_time
-secs <- forever  / nrow(runs)
-sprintf("Yo, %1.2f total time and %1.2f per run, %i runs, over %1.2f years of data", 
-        forever, secs, nrow(runs), date_range)
-
-################# the promised land of pretty graphs
-
-df |>        # Trades and market graph  
-  ggplot(aes(x = time)) +
-  geom_ribbon(aes(ymin=real_low, ymax=real_high, x=time, fill = "band"), alpha = 0.9)+
-  scale_color_manual("", values="grey12")+
-  scale_fill_manual("", values="lightblue") +
-  geom_point(aes(x=time, y=real_close), shape=3, alpha=0.8) +
-  geom_line(aes(x=time, y=lag), alpha=0.5) +
-  geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
-                    yend=sell_price, color=factor(win_lose)), linewidth = 2) +
-  scale_color_manual(values= c("red", "green3")) +
-  labs(title=paste("NQ: blue range of highs and lows, + are closes,", nrow(trades), "trades"),
-       subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag )) +
-  xlab("Date")+
-  ylab("NQ")
-# https://ggplot2.tidyverse.org/reference/sec_axis.html?q=secondary%20axis#arguments
-ggsave(paste("output/fig 1b EMA", lag, interval, "hr", as.Date(start_date), "to", as.Date(end_date), ".pdf"))
-
-
-df |>        # Trades    
-  ggplot() +
-  geom_line( aes(x=time, y=real_close), size=1, alpha=1) +
-  geom_line(aes(x=time, y=lag), alpha=0.4) +
-  geom_segment(data=trades, aes(x=buy_date, y=buy_price, xend=sell_date,
-                    yend=sell_price,color=factor(win_lose)), linewidth = 2) +
-  labs(title="Trades, EMA and candle closes",
-       subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag))
-
-traz <- trades |>  # Trades facet wrap attempt   Fix the damn trade lines and line color
-     mutate(
-    buy_date_day_before = buy_date - days(1),
-    sell_date_day_after = sell_date + days(1),
-    trade_index = row_number())  # Create an index variable for trade facets
-
-  ggplot() +
-  geom_line(data=df, aes(x=time, y=lag), alpha=0.4) +
-  geom_line(data=df, aes(x=time, y=real_close), alpha=0.7) +
-  geom_segment(data=traz, aes(x=buy_date_day_before, y=buy_price, 
-        xend=sell_date_day_after, yend=sell_price, color=factor(win_lose)), linewidth = 1) +
-  scale_color_manual(values= c("red", "green3")) +
-  facet_wrap(~ trade_index, scales = "free_x") +
-  labs(title="Trades, EMA and candle closes",
-       subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag))
-
-
-
-df |>        # lake over time with equity
+df |>        # lake over time with equity line
   ggplot(aes(x = time)) +
   geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=time, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
@@ -324,29 +264,27 @@ df |>        # lake over time with equity
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag ),
        x="Year", y="Ending equity after $23k opening margin start") +
   scale_y_continuous(labels=scales::dollar_format())
+ggsave(paste0("output/lake over time ", interval, "hr EMA ", lag, " ", epoch, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
+
+}       #################### optimization loop end    ##########################
+
+# save the results and trades_global files
+run_id <- paste0( " ", interval, "hr EMAs ", EMA_low, "-", EMA_high, " from", epoch)
+results_file_name <- paste0(path, "/output/results ", run_id, run_time, ".csv", sep="")
+write_csv(results, results_file_name)
+trade_file_name <- paste0(path, "/output/trades ", run_id, run_time, ".csv", sep="")
+write_csv(trades_global, trade_file_name)
 
 
-df |>        # lake over time with highwter line
-  ggplot(aes(x = time)) +
-  geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=time, fill = "band"), alpha = 0.9)+
-  scale_color_manual("", values="grey12")+
-  scale_fill_manual("", values="red") +
-  geom_line(aes(y = highwater*20), size = 1, alpha = 0.8) +
-  labs(title=paste("Lake Ratio with highwater line"),
-       subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag ),
-       x="Year", y="Ending equity after $23k opening margin start") +
-  scale_y_continuous(labels=scales::dollar_format())
+end_time <- Sys.time() ;forever <- end_time - start_time
+secs <- forever  / nrow(runs)
+sprintf("Yo, %1.2f total time and %1.2f per run, %i runs, over %1.2f years of data", 
+        forever, secs, nrow(runs), date_range)
 
-df |>       # equity, highwater and market lines
-  mutate(market = (real_close-min(real_close))* (max(highwater) / (max(real_close)-min(real_close)))) |>
-  ggplot(aes(x = time)) +
-  geom_line(aes(y = equity),size = 1,  alpha = 0.9) +
-  geom_line(aes(y=highwater), size=1,  alpha=0.4, color="black") +
-  geom_line(aes(y=market), size=2, alpha=0.1) +
-  labs(title=paste("Equity with highwater and the market"),
-    subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag))
+################# the promised land of pretty graphs
 
-#   risk and return optimization scatterplots
+
+####################   risk and return optimization scatterplots
 
 results |>         # labels for EMA numbers, little white boxes
   ggplot(aes(x = ICAGR, y = drawdown, label = lag)) +
@@ -355,6 +293,7 @@ results |>         # labels for EMA numbers, little white boxes
                    min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Growth rate vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag))
+ggsave(paste0("output/risk ICAGR v DD ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
 results |>
   ggplot(aes(x = lake, y = bliss, label = lag)) +
@@ -363,6 +302,7 @@ results |>
             min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Lake ratio vs bliss"),
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag))
+ggsave(paste0("output/risk lake v bliss ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
 results |>
   ggplot(aes(x = lake, y = drawdown, label = lag)) +
@@ -371,6 +311,7 @@ results |>
                    min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Lake ratio vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag))
+ggsave(paste0("output/risk lave v DD ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
 results |>
   ggplot(aes(x = end_value, y = drawdown, label = lag)) +
@@ -380,6 +321,7 @@ results |>
   scale_x_continuous(labels=scales::dollar_format()) +
   labs(title=paste("Ending value vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag)) 
+ggsave(paste0("output/risk end value v DD ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
   # geom_smooth(method = "lm")
 
@@ -390,6 +332,7 @@ results |>
        min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Growth rate vs lake ratio"),
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag)) 
+ggsave(paste0("output/risk ICAGR v lake ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
 results |>
   ggplot(aes(x = bliss, y = drawdown, label = lag)) +
@@ -398,6 +341,7 @@ results |>
           min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Bliss vs drawdowns"),
        subtitle=paste(start_date, "to", end_date, interval, "hr", "EMA:", lag)) 
+ggsave(paste0("output/risk bliss v DD ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
 
 
