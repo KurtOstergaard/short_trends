@@ -290,7 +290,7 @@ write_csv(trades_global, trade_file_name)
 
 results |>         # labels for EMA numbers, little white boxes
   ggplot(aes(x = ICAGR, y = drawdown, label = lag)) +
-  geom_point(shape=4) +
+  geom_path(aes(colour = as.numeric(lake))) +     ############      HEY look, cool path adds color for another variable
   geom_label_repel(label.padding=unit(0.15, "lines"), label.size=0.05, 
                    min.segment.length=0, force=0.5, max.iter=10000) +
   labs(title=paste("Growth rate vs drawdowns"),
