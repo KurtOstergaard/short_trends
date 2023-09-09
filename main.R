@@ -21,7 +21,7 @@ run_time <- paste0(" ", get_hour(start_time), "-", get_minute(start_time))
 path <- getwd()
 
 # Key input parameters
-
+product <- "NQ"    
 EMA_low <- 70
 EMA_high <- 150
 
@@ -237,12 +237,12 @@ for (j in seq_len(nrow(runs))) {
                         yend=sell_price, color=factor(win_lose)), linewidth = 2) +
     scale_color_manual(values= c("red", "green3")) +
     scale_y_continuous(sec.axis=sec_axis(~ . *(max(df$real_high)/min(df$real_low))-(min(df$real_low)) )) +
-    geom_line(aes(x=time, y=equity *(max(real_high)/min(real_low)) + min(real_low)-min(equity)), size=2, alpha=0.7, color="deepskyblue") +
-    labs(title=sprintf("NQ: EMA: %0.f, %.0f trades, ICAGR:, %.2f, bliss: %.2f, lake: %.2f", 
-                       lag, nrow(trades), ICAGR, bliss, lake),
-         subtitle=paste0(candles, "chart, ", round(date_range, 1), " yrs of data, ", epoch))+
+    geom_line(aes(x=time, y=equity *(max(real_high)/min(real_low)) + min(real_low)-min(equity)), linewidth=2, alpha=0.7, color="deepskyblue") +
+      labs(title=sprintf("%s: EMA: %0.f, %.0f trades, ICAGR:, %.2f, bliss: %.2f, lake: %.2f", 
+                         product, lag, nrow(trades), ICAGR, bliss, lake),
+           subtitle=paste0(candles, "chart, ", round(date_range, 1), " yrs of data, ", epoch))+
     xlab("Date")+
-    ylab("NQ") +
+    ylab(product) +
     theme(legend.position = "none")
           
     ggsave(paste0("output/run ", candles, "chart EMA ", lag, " ", epoch, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
@@ -252,8 +252,8 @@ trades |>
   ggplot(aes(MAE_percent, trade_pnl_percent,  color=factor(win_lose))) +
   geom_point(shape=3, size=2,) +
   scale_color_manual(values= c("red","green3")) + 
-  labs(title=sprintf("NQ: EMA: %0.f, %.0f trades, ICAGR: %.2f, bliss: %.2f, lake: %.2f, DD: %.2f", 
-                     lag, nrow(trades), ICAGR, bliss, lake, drawdown),
+  labs(title=sprintf("%s: EMA: %0.f, %.0f trades, ICAGR:, %.2f, bliss: %.2f, lake: %.2f", 
+                     product, lag, nrow(trades), ICAGR, bliss, lake),
        subtitle=paste0(candles, " chart, ", round(date_range, 1), " yrs of data, ", epoch))+
   xlab("Maximum Adverse Excursion") + 
   ylab("Trade P&L") +
@@ -266,7 +266,7 @@ df |>        # lake over time with equity line
   geom_ribbon(aes(ymin=equity*20, ymax=highwater*20, x=time, fill = "band"), alpha = 0.9)+
   scale_color_manual("", values="grey12")+
   scale_fill_manual("", values="red") +
-  geom_line(aes(y = highwater*20), size = 1, alpha = 0.6) +
+  geom_line(aes(y = highwater*20), linewidth = 1, alpha = 0.6) +
   geom_line(aes(x=time, y=drawdown *max(highwater)*20/max(drawdown)), alpha=0.2) +
   labs(title=sprintf("Lake Ratio: %0.2f, %.0f trades, ICAGR: %.2f, Bliss: %.2f, DD: %.2f", 
                      lake, nrow(trades), ICAGR, bliss,  drawdown),
@@ -296,7 +296,7 @@ results |>         # labels for EMA numbers, little white boxes
   labs(title=paste("Growth rate vs drawdowns"),
        subtitle=paste0(candles, " periods, EMA: ", EMA_low, "-", EMA_high,", ",
             round(date_range, 1), " yrs of data, ", epoch)) +
-  coord_cartesian(ylim = c(NA,1))
+  coord_cartesian(ylim = c(NA,0.5))
 ggsave(paste0("output/risk ICAGR v DD ", run_id, run_time, ".pdf"), width=10, height=8, units="in", dpi=300)
 
 results |>
