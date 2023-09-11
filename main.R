@@ -23,7 +23,7 @@ path <- getwd()
 # Key input parameters
 product <- "NQ"    
 EMA_low <- 70
-EMA_high <- 150
+EMA_high <- 120
 
 ################ C code for EMA calculation with no leading NA
 sourceCpp(
